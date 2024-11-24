@@ -1,4 +1,4 @@
-const socket = io('ws://https://chat-test-app-flame.vercel.app/')
+const socket = io()
 
 const msgInput = document.querySelector('#message')
 const nameInput = document.querySelector('#name')
