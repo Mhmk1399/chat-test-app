@@ -2,44 +2,47 @@ import express from 'express'
 import { Server } from "socket.io"
 import path from 'path'
 import { fileURLToPath } from 'url'
+import http from 'http'
+import minimist from 'minimist'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = process.env.PORT || 3500
+const argv = minimist(process.argv.slice(2))
+const PORT = argv.p || process.env.PORT || 3500
+const HOST = argv.H || '0.0.0.0'
 const ADMIN = "Admin"
 
 const app = express()
-
 app.use(express.static(path.join(__dirname, "public")))
 
-const expressServer = app.listen(PORT, () => {
-    console.log(`listening on port ${PORT}`)
+// ✅ This is the actual HTTP server for both Express and Socket.IO
+const server = http.createServer(app)
+
+server.listen(PORT, HOST, () => {
+    console.log(`Server running at http://${HOST}:${PORT}/`)
 })
 
-// state 
+// --------- Users State ----------
 const UsersState = {
     users: [],
-    setUsers: function (newUsersArray) {
+    setUsers(newUsersArray) {
         this.users = newUsersArray
     }
 }
 
-const io = new Server(expressServer, {
+// ✅ FIX: use the `server` here instead of `expressServer`
+const io = new Server(server, {
     cors: {
-        origin: process.env.NODE_ENV === "production" ? false : ["https://chat-test-app-flame.vercel.app", "https://chat-test-app-flame.vercel.app/"]
+        origin: process.env.NODE_ENV === "production" ? false : ["https://chat-test-app-flame.vercel.app"]
     }
 })
 
 io.on('connection', socket => {
     console.log(`User ${socket.id} connected`)
-
-    // Upon connection - only to user 
     socket.emit('message', buildMsg(ADMIN, "Welcome to Chat App!"))
 
     socket.on('enterRoom', ({ name, room }) => {
-
-        // leave previous room 
         const prevRoom = getUser(socket.id)?.room
 
         if (prevRoom) {
@@ -49,34 +52,25 @@ io.on('connection', socket => {
 
         const user = activateUser(socket.id, name, room)
 
-        // Cannot update previous room users list until after the state update in activate user 
         if (prevRoom) {
             io.to(prevRoom).emit('userList', {
                 users: getUsersInRoom(prevRoom)
             })
         }
 
-        // join room 
         socket.join(user.room)
-
-        // To user who joined 
         socket.emit('message', buildMsg(ADMIN, `You have joined the ${user.room} chat room`))
-
-        // To everyone else 
         socket.broadcast.to(user.room).emit('message', buildMsg(ADMIN, `${user.name} has joined the room`))
 
-        // Update user list for room 
         io.to(user.room).emit('userList', {
             users: getUsersInRoom(user.room)
         })
 
-        // Update rooms list for everyone 
         io.emit('roomList', {
             rooms: getAllActiveRooms()
         })
     })
 
-    // When user disconnects - to all others 
     socket.on('disconnect', () => {
         const user = getUser(socket.id)
         userLeavesApp(socket.id)
@@ -96,7 +90,6 @@ io.on('connection', socket => {
         console.log(`User ${socket.id} disconnected`)
     })
 
-    // Listening for a message event 
     socket.on('message', ({ name, text }) => {
         const room = getUser(socket.id)?.room
         if (room) {
@@ -104,7 +97,6 @@ io.on('connection', socket => {
         }
     })
 
-    // Listen for activity 
     socket.on('activity', (name) => {
         const room = getUser(socket.id)?.room
         if (room) {
@@ -113,6 +105,7 @@ io.on('connection', socket => {
     })
 })
 
+// --------- Utility Functions ----------
 function buildMsg(name, text) {
     return {
         name,
@@ -125,7 +118,6 @@ function buildMsg(name, text) {
     }
 }
 
-// User functions 
 function activateUser(id, name, room) {
     const user = { id, name, room }
     UsersState.setUsers([
