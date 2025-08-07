@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f5f5f5; }
+        .admin-header { background: #007bff; color: white; padding: 20px; text-align: center; }
+        .rooms-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; padding: 20px; }
+        .room-card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .room-header { display: flex; justify-content: space-between; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+        .room-messages { height: 250px; overflow-y: auto; margin-bottom: 15px; padding: 10px; background: #f9f9f9; border-radius: 5px; }
+        .admin-input { display: flex; gap: 10px; }
+        .admin-input input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
+        .admin-input button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .message { margin-bottom: 8px; padding: 8px; border-radius: 5px; font-size: 14px; }
+        .message.admin { background: #e3f2fd; }
+        .message.user { background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <div class="admin-header">
+        <h1>Admin Panel</h1>
+        <p>Monitor and respond to chat rooms</p>
+    </div>
+    
+    <div class="rooms-grid" id="roomsGrid"></div>
+
+    <script>
+        const socket = io({ auth: { token: null } });
+        const roomsGrid = document.getElementById('roomsGrid');
+        const activeRooms = new Map();
+
+        // Load all rooms with messages from database on connect
+        socket.on('connect', () => {
+            console.log('Admin connected, loading all rooms');
+            loadAllRooms();
+        });
+        
+        socket.on('roomList', ({ rooms }) => {
+            console.log('Admin received room list:', rooms);
+            rooms.forEach(room => {
+                if (!activeRooms.has(room)) {
+                    createRoomCard(room);
+                }
+            });
+        });
+        
+        function loadAllRooms() {
+            fetch('/api/rooms')
+                .then(response => response.json())
+                .then(rooms => {
+                    console.log('Loaded rooms from DB:', rooms);
+                    rooms.forEach(room => {
+                        if (!activeRooms.has(room)) {
+                            createRoomCard(room);
+                        }
+                    });
+                })
+                .catch(error => console.error('Error loading rooms:', error));
+        }
+
+        socket.on('message', (data) => {
+            console.log('Admin received message:', data);
+            // Show message in the correct room
+            if (data.room) {
+                const roomCard = document.getElementById(`room-${data.room}`);
+                if (roomCard) {
+                    const messagesDiv = roomCard.querySelector('.room-messages');
+                    addMessageToRoom(messagesDiv, data);
+                }
+            }
+        });
+
+        function createRoomCard(roomName) {
+            activeRooms.set(roomName, true);
+            const roomCard = document.createElement('div');
+            roomCard.className = 'room-card';
+            roomCard.id = `room-${roomName}`;
+            roomCard.innerHTML = `
+                <div class="room-header">
+                    <h3>${roomName}</h3>
+                    <span class="user-count">0 users</span>
+                </div>
+                <div class="room-messages"></div>
+                <div class="admin-input">
+                    <input type="text" placeholder="Type response..." onkeypress="handleAdminMessage(event, '${roomName}')">
+                    <button onclick="sendAdminMessage('${roomName}')">Send</button>
+                </div>
+            `;
+            roomsGrid.appendChild(roomCard);
+            // Join room to receive messages (admin joins silently)
+            console.log('Admin joining room:', roomName);
+            socket.emit('adminJoinRoom', { room: roomName });
+            
+            // Load message history for this room
+            loadRoomHistory(roomName);
+        }
+        
+        function loadRoomHistory(roomName) {
+            fetch(`/api/messages/${roomName}`)
+                .then(response => response.json())
+                .then(messages => {
+                    const roomCard = document.getElementById(`room-${roomName}`);
+                    if (roomCard) {
+                        const messagesDiv = roomCard.querySelector('.room-messages');
+                        messages.forEach(msg => {
+                            addMessageToRoom(messagesDiv, msg);
+                        });
+                    }
+                })
+                .catch(error => console.error('Error loading room history:', error));
+        }
+
+        function addMessageToRoom(messagesDiv, data) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${data.name === 'Admin' ? 'admin' : 'user'}`;
+            messageDiv.innerHTML = `<strong>${data.name}:</strong> ${data.text} <small>${data.time}</small>`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function handleAdminMessage(event, roomName) {
+            if (event.key === 'Enter') sendAdminMessage(roomName);
+        }
+
+        function sendAdminMessage(roomName) {
+            const input = document.querySelector(`#room-${roomName} input`);
+            if (input.value.trim()) {
+                console.log('Sending admin message:', { room: roomName, text: input.value.trim() });
+                socket.emit('adminMessage', { room: roomName, text: input.value.trim() });
+                input.value = '';
+            }
+        }
+
+        socket.on('userList', ({ users, room }) => {
+            const roomCard = document.getElementById(`room-${room}`);
+            if (roomCard) {
+                roomCard.querySelector('.user-count').textContent = `${users.length} users`;
+            }
+        });
+    </script>
+</body>
+</html>
