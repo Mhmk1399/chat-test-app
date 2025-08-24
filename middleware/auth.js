@@ -1,42 +1,34 @@
-import jwt from 'jsonwebtoken';
+// Replace your middleware/auth.js with this:
 
-export const extractUserFromToken = (token) => {
-    try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        return {
-            userId: decoded.userId || decoded.id,
-            name: decoded.name,
-            role: decoded.role || 'user'
-        };
-    } catch (error) {
-        return null;
-    }
-};
+import jwt from "jsonwebtoken";
 
 export const socketAuth = (socket, next) => {
-    const token = socket.handshake.auth.token;
+  const token = socket.handshake.auth.token;
+  
+  if (!token || token === "guest") {
+    socket.userName = "Guest";
+    socket.sessionId = socket.id;
+    socket.userId = socket.id;
+    socket.userRole = "guest";
+    return next();
+  }
+  
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    if (token) {
-        const user = extractUserFromToken(token);
-        if (user) {
-            socket.userId = user.userId;
-            socket.userName = user.name;
-            socket.userRole = user.role;
-            socket.isGuest = false;
-        } else {
-            // Invalid token, treat as guest
-            socket.userId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            socket.userName = 'Guest';
-            socket.userRole = 'guest';
-            socket.isGuest = true;
-        }
-    } else {
-        // No token, guest user
-        socket.userId = `guest_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        socket.userName = 'Guest';
-        socket.userRole = 'guest';
-        socket.isGuest = true;
-    }
+    const validRoles = ["admin", "user", "superadmin", "consultant", "guest"];
+    const userRole = validRoles.includes(decoded.role) ? decoded.role : "user";
     
+    socket.userName = decoded.name || "User";
+    socket.sessionId = decoded.id || socket.id;
+    socket.userId = decoded.id || socket.id;
+    socket.userRole = userRole;
     next();
+  } catch (err) {
+    socket.userName = "Guest";
+    socket.sessionId = socket.id;
+    socket.userId = socket.id;
+    socket.userRole = "guest";
+    next();
+  }
 };

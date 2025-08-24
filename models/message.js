@@ -20,6 +20,15 @@ const messageSchema = new mongoose.Schema({
   time: {
     type: String,
     required: true
+  },
+  isRead: {
+    type: Boolean,
+    default: false
+  },
+  messageType: {
+    type: String,
+    enum: ['user', 'admin', 'system'],
+    default: 'user'
   }
 }, {
   timestamps: true
